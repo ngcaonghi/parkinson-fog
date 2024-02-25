@@ -19,11 +19,15 @@ import numpy as np
 from scipy import signal
 from scipy.signal import hilbert
 from sklearn.decomposition import FastICA
+from functools import partial, update_wrapper
+import matplotlib.pyplot as plt
+from graphviz import Digraph
 
 # exports
 __all__ = ['cartesian_to_spherical', 'butter_bandpass_filter', 'moving_average', 
            'window_sinc_convolve', 'acceleration_to_velocity', 'normalize', 
-           'hilbert_transform', 'spectrogram', 'noise_remove_ica']
+           'hilbert_transform', 'spectrogram', 'noise_remove_ica', 
+           'WrappedPartial', 'FunctionNode']
 
 
 def _cartesian_to_spherical(x, y, z):
@@ -31,11 +35,11 @@ def _cartesian_to_spherical(x, y, z):
     Given a 3D vector in cartesian coordinates, convert to spherical coordinates
 
     Args:
-        x, y, z: float
+        - x, y, z (float):
             x, y, z coordinates of the vector
     
     Returns:
-        r, theta, phi: float
+        - r, theta, phi: float
     '''
     r = np.sqrt(x**2 + y**2 + z**2)  # Radial distance
     if r == 0:
@@ -52,11 +56,11 @@ def cartesian_to_spherical(data):
     convert cartesian coordinates to spherical coordinates.
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (3, n_timepoints) in cartesian coordinates
 
     Returns:
-        r, theta, phi: numpy array
+        - r, theta, phi (numpy array):
             2D array of (3, n_timepoints) in spherical coordinates
     '''
     r, theta, phi = np.apply_along_axis(lambda m: _cartesian_to_spherical(*m), 
@@ -69,19 +73,19 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=5):
     Perform bandpass filtering on a 2D array of (n_channels, n_timepoints).
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
-        lowcut: float
+        - lowcut (float):
             Lower cutoff frequency
-        highcut: float
+        - highcut (float):
             Upper cutoff frequency
-        fs: float
+        - fs (float):
             Sampling frequency
-        order: int
+        - order (int):
             Order of the filter
     
     Returns:
-        data: numpy array of (n_channels, n_timepoints)
+        - data: numpy array of (n_channels, n_timepoints)
     '''
     nyq = 0.5 * fs
     low = lowcut / nyq
@@ -97,13 +101,13 @@ def moving_average(data, window_size):
     Perform moving average on a 2D array of (n_channels, n_timepoints).
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
-        window_size: int
+        - window_size (int):
             Size of the moving average window
 
     Returns:
-        data: numpy array of (n_channels, n_timepoints)
+        - data: numpy array of (n_channels, n_timepoints)
     '''
     kernel = np.ones(window_size) / window_size
     data = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode='same'), 
@@ -116,15 +120,15 @@ def window_sinc_convolve(data, window_size, fs):
     Perform windowed sinc convolution on a 2D array of (n_channels, n_timepoints).
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
-        window_size: int
+        - window_size (int):
             Size of the window
-        fs: float
+        - fs (float):
             Sampling frequency
 
     Returns:
-        data: numpy array of (n_channels, n_timepoints)
+        - data: numpy array of (n_channels, n_timepoints)
     '''
     kernel = np.sinc(2 * window_size * np.arange(fs) / fs)
     data = np.apply_along_axis(lambda m: np.convolve(m, kernel, mode='same'), 
@@ -138,13 +142,13 @@ def acceleration_to_velocity(data, fs):
     convert to velocity.
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints) in acceleration
-        fs: float
+        - fs (float):
             Sampling frequency
 
     Returns:
-        data: numpy array of (n_channels, n_timepoints) in velocity
+        - data: numpy array of (n_channels, n_timepoints) in velocity
     '''
     data = np.apply_along_axis(lambda m: np.cumsum(m) / fs, axis=1, arr=data)
     return data
@@ -155,11 +159,11 @@ def normalize(data):
     Given a 2D array of (n_channels, n_timepoints), normalize each channel.
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
 
     Returns:
-        data: numpy array of (n_channels, n_timepoints)
+        - data: numpy array of (n_channels, n_timepoints)
     '''
     data = np.apply_along_axis(lambda m: (m - np.mean(m)) / np.std(m), axis=1, arr=data)
     return data
@@ -172,12 +176,12 @@ def hilbert_transform(data):
     amplitude and phase.
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
 
     Returns:
-        amplitude: numpy array of (n_channels, n_timepoints)
-        phase: numpy array of (n_channels, n_timepoints)
+        - amplitude: numpy array of (n_channels, n_timepoints)
+        - phase: numpy array of (n_channels, n_timepoints)
     '''
     hilbert_transformed = np.apply_along_axis(lambda m: hilbert(m), axis=1, arr=data)
     amplitude = np.abs(hilbert_transformed)
@@ -185,54 +189,190 @@ def hilbert_transform(data):
     return amplitude, phase
 
 
-def spectrogram(data, fs, nperseg=128, noverlap=64, max_freq=50, min_freq=0):
-    '''
-    Given a 2D array of (n_channels, n_timepoints), perform STFT on each channel
-    and return an array of frequencies, an array of time points, and a 3D array 
-    of (n_channels, n_freqs, n_timepoints).
-
-    Args:
-        data: numpy array
-            2D array of (n_channels, n_timepoints)
-        fs: float
-            Sampling frequency
-        nperseg: int
-            Length of each segment
-        noverlap: int
-            Number of points to overlap between segments
-        max_freq: float
-            Maximum frequency to return
-        min_freq: float
-            Minimum frequency to return
-
-    Returns:
-        frequencies: numpy array of (n_freqs,)
-        timepoints: numpy array of (n_timepoints,)
-        spectrogram: numpy array of (n_channels, n_freqs, n_timepoints)
-    '''
-    frequencies, timepoints, spectrogram = signal.spectrogram(data, fs=fs, 
-                                                              nperseg=nperseg, 
-                                                              noverlap=noverlap)
-    # Remove frequencies above max_freq and below min_freq
-    frequencies = frequencies[(frequencies <= max_freq) & (frequencies >= min_freq)]
-    spectrogram = spectrogram[:, (frequencies <= max_freq) & (frequencies >= min_freq), :]
-    return frequencies, timepoints, spectrogram
-
-
 def noise_remove_ica(data, n_components=3):
     '''
     Given a 2D array of (n_channels, n_timepoints), perform ICA to remove noise.
 
     Args:
-        data: numpy array
+        - data (numpy array):
             2D array of (n_channels, n_timepoints)
-        n_components: int
+        - n_components (int):
             Number of components to keep
 
     Returns:
-        data: numpy array of (n_channels, n_timepoints)
+        - data: numpy array of (n_channels, n_timepoints)
     '''
     ica = FastICA(n_components=n_components)
     data = ica.fit_transform(data.T).T
     return data
+    
+    
+class WrappedPartial:
+    """
+    A class representing a wrapped partial function.
+
+    Parameters:
+    - original_func (callable): The original function to create a partial function from.
+    - *args: Positional arguments to fix in the partial function.
+    - **kwargs: Keyword arguments to fix in the partial function.
+    """
+
+    def __init__(self, original_func, *args, **kwargs):
+        """
+        Initialize a WrappedPartial instance.
+
+        Parameters:
+        - original_func (callable): The original function to create a partial function from.
+        - *args: Positional arguments to fix in the partial function.
+        - **kwargs: Keyword arguments to fix in the partial function.
+        """
+        partial_func = partial(original_func, *args, **kwargs)
+
+        # Preserve __doc__ and __name__ attributes
+        update_wrapper(partial_func, original_func)
+        self.partial_func = partial_func
+
+    def getfunc(self, new_name=None):
+        """
+        Get the partial function.
+
+        Parameters:
+        - new_name (str, optional): If provided, set the __name__ attribute of the partial function to this value.
+
+        Returns:
+        - callable: The partial function.
+        """
+        partial_func = self.partial_func
+        if new_name is not None:
+            partial_func.__name__ = new_name
+        return partial_func 
+    
+    
+    
+class FunctionNode:
+    """
+    A class representing a node associated with a function.
+
+    Parameters:
+    - func (callable): The function associated with the root node.
+    - children (list, optional): List of child nodes. Defaults to an empty list.
+    """
+
+    def __init__(self, func, children=None):
+        """
+        Initialize a FunctionTree instance.
+
+        Parameters:
+        - func (callable): The function associated with the root node.
+        - children (list, optional): List of child nodes. Defaults to an empty list.
+        """
+        self.func = func
+        self.children = children or []
+
+    def add_child(self, child_node):
+        """
+        Add a child node to the root node.
+
+        Parameters:
+        - child_node (FunctionTree): The child node to be added.
+        """
+        self.children.append(FunctionNode(child_node))
+
+    def find_node(self, target_func):
+        """
+        Recursively search for a node with a specific function in the tree.
+
+        Parameters:
+        - target_func (callable): The target function to search for.
+
+        Returns:
+        - FunctionTree or None: The node with the target function, or None if not found.
+        """
+        if self.func == target_func:
+            return self
+        else:
+            for child in self.children:
+                found_node = child.find_node(target_func)
+                if found_node:
+                    return found_node
+        return None
+
+    def add_child_to_node(self, target_func, new_child):
+        """
+        Add a child node to an arbitrary node in the tree.
+
+        Parameters:
+        - target_func (callable): The function associated with the target node.
+        - new_child (FunctionTree): The child node to be added to the target node.
+        """
+        target_node = self.find_node(target_func)
+        if target_node:
+            target_node.add_child(new_child)
+        else:
+            print(f"Node with function {target_func} not found.")
+
+    def _evaluate(self, input_value):
+        """
+        Recursively evaluate the tree and return a list of outputs from all leaf nodes.
+
+        Parameters:
+        - input_value: The input value to be used in the function evaluations.
+
+        Returns:
+        - list: A list of outputs from all leaf nodes.
+        """
+        if not self.children:
+            return self.func(input_value), 
+        else:
+            curr_result = self.func(input_value)
+            child_results = [child.evaluate(curr_result) for child in self.children]
+            
+            return  [result for sublist in child_results for result in sublist]
+        
+    def evaluate(self, input_value):
+        """
+        Evaluate the tree and return a list of outputs from all leaf nodes.
+
+        Parameters:
+        - input_value: The input value to be used in the function evaluations.
+
+        Returns:
+        - numpy.ndarray: A numpy array stacking all data produced from the leaf nodes on axis 0.
+        The resulting shape is (n_leaves, ...).
+        """
+        results = self._evaluate(input_value)
+        return np.array(results)
+        
+
+    def visualize(self, graph=None, parent_name=None, graphviz=None, size=None):
+        """
+        Generate a graphical representation of the tree using Graphviz.
+
+        Parameters:
+        - graph (Digraph, optional): The Graphviz graph. Defaults to None.
+        - parent_name (str, optional): The name of the parent node. Defaults to None.
+        - graphviz (Digraph, optional): The original Graphviz graph. Defaults to None.
+        - size (tuple, optional): The size of the output graph. Defaults to None.
+
+        Returns:
+        - Digraph: The Graphviz graph.
+        """
+        if graph is None:
+            graph = Digraph(format='png')
+
+            # Set the size if provided
+            if size:
+                graph.attr(size=size)
+
+            graphviz = graph
+        current_name = str(id(self))
+        graph.node(current_name, label=str(self.func.__name__))
+
+        if parent_name is not None:
+            graph.edge(parent_name, current_name)
+
+        for i, child in enumerate(self.children):
+            child.visualize(graph, current_name, graphviz=graphviz, size=size)
+
+        return graph
     
