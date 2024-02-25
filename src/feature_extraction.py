@@ -10,7 +10,6 @@ freezing-of-gait data, including:
     - Acceleration to velocity conversion
     - Normalization
     - Hilbert transform
-    - Spectrogram
     - Noise removal using ICA
     - WrappedPartial: A class to wrap a partial function
     - FunctionNode: A class to represent a node associated with a function
